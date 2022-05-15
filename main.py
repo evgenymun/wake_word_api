@@ -18,12 +18,79 @@ import numpy as np
 
 import torch
 import torchaudio
-import sounddevice as sd
+#sudo apt-get install libportaudio2
+# import sounddevice as sd
 from scipy.io.wavfile import write
 from torch import nn
 # from torchsummary import summary
 
 app = FastAPI()
+
+import wave
+from dataclasses import dataclass, asdict
+
+import pyaudio
+
+
+@dataclass
+class StreamParams:
+    format: int = pyaudio.paInt16
+    channels: int = 1
+    rate: int = 16000
+    frames_per_buffer: int = 1024
+    input: bool = True
+    output: bool = False
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+class Recorder:
+    """Recorder uses the blocking I/O facility from pyaudio to record sound
+    from mic.
+
+    Attributes:
+        - stream_params: StreamParams object with values for pyaudio Stream
+            object
+    """
+    def __init__(self, stream_params: StreamParams) -> None:
+        self.stream_params = stream_params
+        self._pyaudio = None
+        self._stream = None
+        self._wav_file = None
+
+    def record(self, duration: int, save_path: str) -> None:
+        """Record sound from mic for a given amount of seconds.
+
+        :param duration: Number of seconds we want to record for
+        :param save_path: Where to store recording
+        """
+        print("Start recording...")
+        self._create_recording_resources(save_path)
+        self._write_wav_file_reading_from_stream(duration)
+        self._close_recording_resources()
+        print("Stop recording")
+
+    def _create_recording_resources(self, save_path: str) -> None:
+        self._pyaudio = pyaudio.PyAudio()
+        self._stream = self._pyaudio.open(**self.stream_params.to_dict())
+        self._create_wav_file(save_path)
+
+    def _create_wav_file(self, save_path: str):
+        self._wav_file = wave.open(save_path, "wb")
+        self._wav_file.setnchannels(self.stream_params.channels)
+        self._wav_file.setsampwidth(self._pyaudio.get_sample_size(self.stream_params.format))
+        self._wav_file.setframerate(self.stream_params.rate)
+
+    def _write_wav_file_reading_from_stream(self, duration: int) -> None:
+        for _ in range(int(self.stream_params.rate * duration / self.stream_params.frames_per_buffer)):
+            audio_data = self._stream.read(self.stream_params.frames_per_buffer)
+            self._wav_file.writeframes(audio_data)
+
+    def _close_recording_resources(self) -> None:
+        self._wav_file.close()
+        self._stream.close()
+        self._pyaudio.terminate()
 
 
 WAKE_WORDS = ["hey", "fourth", "brain"]
@@ -202,9 +269,20 @@ def wav():
     fs = 16000  # Sample rate
     seconds = 4  # Duration of recording
 
-    myrecording = sd.rec(int(seconds * fs), samplerate=fs, channels=1)
-    sd.wait()  # Wait until recording is finished
-    write('./vab/output.wav', fs, myrecording)  # Save as WAV file 
+    # myrecording = sd.rec(int(seconds * fs), samplerate=fs, channels=1)
+    stream_params = StreamParams()
+    recorder = Recorder(stream_params)
+    recorder.record(3, "/vab/output.wav")
 
-    return (predict_wake_word('./vab/output.wav'))
+    # sd.wait()  # Wait until recording is finished
+    # write('./vab/output.wav', fs, myrecording)  # Save as WAV file 
+
+    return (predict_wake_word('vab/output.wav'))
     
+# server {
+#     listen 80;
+#     server_name 34.222.29.197;
+#     location / {
+#         proxy_pass http://127.0.0.1:8000;
+#     }
+# }
